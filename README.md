@@ -119,7 +119,7 @@ cd ~
 Clone this repository and name the downloaded folder `hostforge`:
 
 ```bash
-git clone https://github.com/Sartiye/Hosforge-Bannerlord-Linux-Panel.git hostforge
+git clone https://github.com/Sartiye/HostForge-Bannerlord-Linux-Panel.git hostforge
 ```
 
 Enter the new folder:
