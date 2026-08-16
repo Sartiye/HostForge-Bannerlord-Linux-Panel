@@ -1,0 +1,24 @@
+[Unit]
+Description=HostForge Web Control Plane and Log Collector
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_DIR__
+ExecStart=/usr/bin/env python3 __REPO_DIR__/app/hostforge_collector.py
+Restart=on-failure
+RestartSec=5
+User=__USER__
+Environment=HOME=__USER_HOME__
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-__REPO_DIR__/configs/hostforge.env
+Environment=HF_COLLECTOR_BIND=__COLLECTOR_BIND__
+Environment=HF_COLLECTOR_PORT=__COLLECTOR_PORT__
+Environment=HF_COLLECTOR_DATA_DIR=__REPO_DIR__/logs
+Environment=HF_COLLECTOR_SITE_TITLE=HostForge
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

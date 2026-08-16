@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+
+# Runtime configuration contains local paths and may contain passwords or tokens.
+configs/*
+!configs/.gitkeep

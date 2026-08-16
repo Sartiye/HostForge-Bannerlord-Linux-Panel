@@ -1,0 +1,44 @@
+[Unit]
+Description=HostForge Bannerlord Dedicated Runner (%i)
+After=hostforge-collector.service network-online.target
+Wants=hostforge-collector.service network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_DIR__
+ExecStart=__REPO_DIR__/hostforge.sh __run-profile %i
+ExecStop=/bin/bash -lc 'PATH=/opt/wine-stable/bin:$PATH; WINEPREFIX=__USER_HOME__/.wine-hostforge-%i wineserver -k || true'
+ExecStopPost=/bin/bash -lc 'PATH=/opt/wine-stable/bin:$PATH; WINEPREFIX=__USER_HOME__/.wine-hostforge-%i wineserver -k || true'
+Restart=always
+RestartSec=10
+User=__USER__
+Environment=HOME=__USER_HOME__
+Environment=PATH=/opt/wine-stable/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HF_INSTANCE_ID=%i
+Environment=HF_LOG_API_ENABLED=1
+Environment=HF_LOG_API_URL=http://127.0.0.1:__COLLECTOR_PORT__/v1/logs
+Environment=HF_USE_XVFB=1
+Environment=HF_WINE_VIRTUAL_DESKTOP=1
+Environment=HF_WINE_DESKTOP_SIZE=1280x720
+Environment=HF_WINEPREFIX=__USER_HOME__/.wine-hostforge-%i
+Environment=HF_WINEPREFIX_TEMPLATE=__USER_HOME__/.wine-hostforge
+Environment=HF_WINEDEBUG=err+all,warn-all,fixme-all
+Environment=HF_WINEDLLOVERRIDES=winedbg.exe=d;winemenubuilder.exe=d
+Environment=HF_DEBUG_MODE=0
+Environment=HF_WINE_LOG_DIR=__REPO_DIR__/logs/wine
+Environment=HF_DOTNET_DUMP_ENABLED=1
+Environment=HF_DOTNET_DUMP_TYPE=4
+Environment=HF_DOTNET_DUMP_DIR=__REPO_DIR__/logs/dumps
+Environment=COMPlus_gcServer=0
+Environment=DOTNET_gcServer=0
+RuntimeDirectory=hostforge-%i
+RuntimeDirectoryMode=0700
+KillMode=control-group
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

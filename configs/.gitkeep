@@ -1,0 +1,5 @@
+Keep this directory in git. Community operators add their own:
+
+- ds_params_<profile>.txt
+- ds_config_<profile>.txt
+- bannerlord-path-server.txt

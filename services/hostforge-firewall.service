@@ -1,0 +1,18 @@
+[Unit]
+Description=HostForge ipset Player Traffic Tracker
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=__REPO_DIR__
+ExecStart=__REPO_DIR__/hostforge.sh __firewall-apply-root
+ExecStop=__REPO_DIR__/hostforge.sh __firewall-remove-root
+Environment=HOME=__USER_HOME__
+EnvironmentFile=-__REPO_DIR__/configs/hostforge.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

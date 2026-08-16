@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Module>
+	<Name value="MBWarlords HostForge"/>
+	<Id value="MBWarlords.HostForge"/>
+	<Version value="v1.0.0.0"/>
+	<ModuleCategory value="Server"/>
+	<DependedModules>
+		<DependedModule Id="Native" DependentVersion="v1.4.8" Optional="false"/>
+		<DependedModule Id="Multiplayer" DependentVersion="v1.4.8" Optional="false"/>
+	</DependedModules>
+	<SubModules>
+		<SubModule>
+			<Name value="HostForge.SubModule"/>
+			<DLLName value="MBWarlords.HostForge.dll"/>
+			<SubModuleClassType value="MBWarlords.HostForge.HostForgeSubModule"/>
+			<Tags>
+				<Tag key="DedicatedServerType" value="custom" />
+			</Tags>
+		</SubModule>
+	</SubModules>
+	<Xmls/>
+</Module>

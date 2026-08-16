@@ -1,0 +1,20 @@
+[Unit]
+Description=HostForge Cloudflare Quick Tunnel
+After=hostforge-collector.service network-online.target
+Wants=hostforge-collector.service network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash -lc 'exec cloudflared tunnel --no-autoupdate --protocol "$HF_CLOUDFLARED_PROTOCOL" --url "$HF_CLOUDFLARED_ORIGIN_URL"'
+Restart=on-failure
+RestartSec=5
+User=__USER__
+Environment=HOME=__USER_HOME__
+Environment=HF_CLOUDFLARED_ORIGIN_URL=http://127.0.0.1:__COLLECTOR_PORT__
+Environment=HF_CLOUDFLARED_PROTOCOL=http2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
