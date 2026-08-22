@@ -107,13 +107,33 @@ HF_WEB_PASSWORD='change-me' bash setup.sh
 
 The firewall manager can:
 
-- track player IP traffic on discovered Bannerlord profile ports
+- filter and track UDP traffic on discovered Bannerlord profile ports in raw `PREROUTING`
+- admit collector-verified player IPs and a bounded pending join window
 - blacklist individual IPs
 - clear the blacklist
 - maintain geo country block files under `configs/firewall-geo/`
 - load country CIDR files into one `ipset hash:net`
 
-Geo country blocks apply only to Bannerlord profile ports.
+The HostForge module sends authoritative IPv4 snapshots to the collector at `PUT /v1/firewall/player-ips` from the local machine. The collector unions snapshots across profiles into `hostforge_verified_players`, removes profiles that stop reporting after 30 seconds, and refreshes verified entries with a 90-second timeout. The endpoint rejects non-loopback callers.
+
+Verified sources bypass the pending capacity. Up to 50 unverified source IPs are admitted concurrently through `hostforge_pending_players`; each entry expires after 30 seconds unless packets continue to survive blacklist, geo, PPS, and bandwidth enforcement. New unverified IPs are dropped while all slots are occupied. Filtering occurs before connection tracking, and TCP is not hooked on game ports.
+
+The relevant `configs/hostforge.env` overrides are:
+
+```bash
+HF_FIREWALL_PENDING_MAX=50
+HF_FIREWALL_PENDING_TIMEOUT=30
+HF_PLAYER_IPSET_NAME=hostforge_verified_players
+HF_PLAYER_IPSET_TIMEOUT_SECONDS=90
+HF_PLAYER_SNAPSHOT_STALE_SECONDS=30
+HF_PLAYER_IPSET_MAX_ENTRIES=4096
+HF_FIREWALL_HASHLIMIT_HTABLE_SIZE=1024
+HF_FIREWALL_HASHLIMIT_HTABLE_MAX=4096
+HF_FIREWALL_HASHLIMIT_HTABLE_EXPIRE_MS=2000
+HF_FIREWALL_HASHLIMIT_HTABLE_GCINTERVAL_MS=1000
+```
+
+Geo country blocks apply only to Bannerlord profile ports. Applying the firewall migrates legacy filter-table chains to the raw-table layout. Stopping it removes the player, pending, and geo sets but intentionally preserves the blacklist and collector-owned verified set.
 
 ## Repo Maintenance
 

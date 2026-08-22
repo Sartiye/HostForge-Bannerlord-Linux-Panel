@@ -44,18 +44,30 @@ DEFAULT_HOSTFORGE_MODULE_DIR="${HF_HOSTFORGE_MODULE_DIR:-$REPO_DIR/module-hostfo
 DEFAULT_CUSTOM_MODS_FILE="${HF_CUSTOM_MODS_FILE:-$CONFIG_DIR/custom-mods.tsv}"
 DEFAULT_FIREWALL_SET="${HF_FIREWALL_SET:-hostforge_players}"
 DEFAULT_FIREWALL_BLACKLIST_SET="${HF_FIREWALL_BLACKLIST_SET:-hostforge_blacklist}"
+DEFAULT_FIREWALL_PENDING_SET="${HF_FIREWALL_PENDING_SET:-hostforge_pending_players}"
+DEFAULT_FIREWALL_VERIFIED_SET="${HF_PLAYER_IPSET_NAME:-hostforge_verified_players}"
+DEFAULT_FIREWALL_INGRESS_CHAIN="${HF_FIREWALL_INGRESS_CHAIN:-HOSTFORGE_INGRESS}"
 DEFAULT_FIREWALL_CHAIN="${HF_FIREWALL_CHAIN:-HOSTFORGE_PLAYERS}"
 DEFAULT_FIREWALL_BLACKLIST_CHAIN="${HF_FIREWALL_BLACKLIST_CHAIN:-HOSTFORGE_BLACKLIST}"
+DEFAULT_FIREWALL_ADMISSION_CHAIN="${HF_FIREWALL_ADMISSION_CHAIN:-HOSTFORGE_ADMISSION}"
 DEFAULT_FIREWALL_GEO_SET="${HF_FIREWALL_GEO_SET:-hostforge_geo_block}"
 DEFAULT_FIREWALL_GEO_CHAIN="${HF_FIREWALL_GEO_CHAIN:-HOSTFORGE_GEO_BLOCK}"
 DEFAULT_FIREWALL_GEO_DIR="${HF_FIREWALL_GEO_DIR:-$CONFIG_DIR/firewall-geo}"
 DEFAULT_FIREWALL_IPSET_TIMEOUT="${HF_FIREWALL_IPSET_TIMEOUT:-3600}"
+DEFAULT_FIREWALL_PENDING_MAX="${HF_FIREWALL_PENDING_MAX:-50}"
+DEFAULT_FIREWALL_PENDING_TIMEOUT="${HF_FIREWALL_PENDING_TIMEOUT:-30}"
+DEFAULT_FIREWALL_VERIFIED_TIMEOUT="${HF_PLAYER_IPSET_TIMEOUT_SECONDS:-90}"
+DEFAULT_FIREWALL_VERIFIED_MAX="${HF_PLAYER_IPSET_MAX_ENTRIES:-4096}"
 DEFAULT_FIREWALL_BLACKLIST_PPS="${HF_FIREWALL_BLACKLIST_PPS:-3000}"
 DEFAULT_FIREWALL_BLACKLIST_BURST="${HF_FIREWALL_BLACKLIST_BURST:-9000}"
 DEFAULT_FIREWALL_HASHLIMIT_NAME="${HF_FIREWALL_HASHLIMIT_NAME:-hf_pps}"
 DEFAULT_FIREWALL_BLACKLIST_BPS="${HF_FIREWALL_BLACKLIST_BPS:-512kb/s}"
 DEFAULT_FIREWALL_BLACKLIST_BPS_BURST="${HF_FIREWALL_BLACKLIST_BPS_BURST:-2mb}"
 DEFAULT_FIREWALL_HASHLIMIT_BPS_NAME="${HF_FIREWALL_HASHLIMIT_BPS_NAME:-hf_bps}"
+DEFAULT_FIREWALL_HASHLIMIT_HTABLE_SIZE="${HF_FIREWALL_HASHLIMIT_HTABLE_SIZE:-1024}"
+DEFAULT_FIREWALL_HASHLIMIT_HTABLE_MAX="${HF_FIREWALL_HASHLIMIT_HTABLE_MAX:-4096}"
+DEFAULT_FIREWALL_HASHLIMIT_HTABLE_EXPIRE_MS="${HF_FIREWALL_HASHLIMIT_HTABLE_EXPIRE_MS:-2000}"
+DEFAULT_FIREWALL_HASHLIMIT_HTABLE_GCINTERVAL_MS="${HF_FIREWALL_HASHLIMIT_HTABLE_GCINTERVAL_MS:-1000}"
 
 trim() {
   local value="$1"
@@ -405,12 +417,28 @@ firewall_blacklist_set_name() {
   printf '%s\n' "${HF_FIREWALL_BLACKLIST_SET:-$DEFAULT_FIREWALL_BLACKLIST_SET}"
 }
 
+firewall_pending_set_name() {
+  printf '%s\n' "${HF_FIREWALL_PENDING_SET:-$DEFAULT_FIREWALL_PENDING_SET}"
+}
+
+firewall_verified_set_name() {
+  printf '%s\n' "${HF_PLAYER_IPSET_NAME:-$DEFAULT_FIREWALL_VERIFIED_SET}"
+}
+
+firewall_ingress_chain_name() {
+  printf '%s\n' "${HF_FIREWALL_INGRESS_CHAIN:-$DEFAULT_FIREWALL_INGRESS_CHAIN}"
+}
+
 firewall_chain_name() {
   printf '%s\n' "${HF_FIREWALL_CHAIN:-$DEFAULT_FIREWALL_CHAIN}"
 }
 
 firewall_blacklist_chain_name() {
   printf '%s\n' "${HF_FIREWALL_BLACKLIST_CHAIN:-$DEFAULT_FIREWALL_BLACKLIST_CHAIN}"
+}
+
+firewall_admission_chain_name() {
+  printf '%s\n' "${HF_FIREWALL_ADMISSION_CHAIN:-$DEFAULT_FIREWALL_ADMISSION_CHAIN}"
 }
 
 firewall_geo_set_name() {
@@ -427,6 +455,22 @@ firewall_geo_dir() {
 
 firewall_ipset_timeout() {
   printf '%s\n' "${HF_FIREWALL_IPSET_TIMEOUT:-$DEFAULT_FIREWALL_IPSET_TIMEOUT}"
+}
+
+firewall_pending_max() {
+  printf '%s\n' "${HF_FIREWALL_PENDING_MAX:-$DEFAULT_FIREWALL_PENDING_MAX}"
+}
+
+firewall_pending_timeout() {
+  printf '%s\n' "${HF_FIREWALL_PENDING_TIMEOUT:-$DEFAULT_FIREWALL_PENDING_TIMEOUT}"
+}
+
+firewall_verified_timeout() {
+  printf '%s\n' "${HF_PLAYER_IPSET_TIMEOUT_SECONDS:-$DEFAULT_FIREWALL_VERIFIED_TIMEOUT}"
+}
+
+firewall_verified_max() {
+  printf '%s\n' "${HF_PLAYER_IPSET_MAX_ENTRIES:-$DEFAULT_FIREWALL_VERIFIED_MAX}"
 }
 
 firewall_blacklist_pps() {
@@ -451,6 +495,22 @@ firewall_blacklist_bps_burst() {
 
 firewall_hashlimit_bps_name() {
   printf '%s\n' "${HF_FIREWALL_HASHLIMIT_BPS_NAME:-$DEFAULT_FIREWALL_HASHLIMIT_BPS_NAME}"
+}
+
+firewall_hashlimit_htable_size() {
+  printf '%s\n' "${HF_FIREWALL_HASHLIMIT_HTABLE_SIZE:-$DEFAULT_FIREWALL_HASHLIMIT_HTABLE_SIZE}"
+}
+
+firewall_hashlimit_htable_max() {
+  printf '%s\n' "${HF_FIREWALL_HASHLIMIT_HTABLE_MAX:-$DEFAULT_FIREWALL_HASHLIMIT_HTABLE_MAX}"
+}
+
+firewall_hashlimit_htable_expire_ms() {
+  printf '%s\n' "${HF_FIREWALL_HASHLIMIT_HTABLE_EXPIRE_MS:-$DEFAULT_FIREWALL_HASHLIMIT_HTABLE_EXPIRE_MS}"
+}
+
+firewall_hashlimit_htable_gcinterval_ms() {
+  printf '%s\n' "${HF_FIREWALL_HASHLIMIT_HTABLE_GCINTERVAL_MS:-$DEFAULT_FIREWALL_HASHLIMIT_HTABLE_GCINTERVAL_MS}"
 }
 
 cloudflared_origin_url() {
@@ -544,6 +604,26 @@ firewall_ports() {
       printf '%s\n' "$port"
     fi
   done < <(discover_profiles) | sort -n -u
+}
+
+firewall_port_groups() {
+  local port group="" count=0
+
+  while IFS= read -r port; do
+    [[ -n "$port" ]] || continue
+    group="${group:+$group,}$port"
+    count=$((count + 1))
+
+    if [[ "$count" -eq 15 ]]; then
+      printf '%s\n' "$group"
+      group=""
+      count=0
+    fi
+  done < <(firewall_ports)
+
+  if [[ -n "$group" ]]; then
+    printf '%s\n' "$group"
+  fi
 }
 
 require_firewall_tools() {
@@ -762,132 +842,200 @@ firewall_geo_load_set() {
   echo "[OK] Loaded $total geo CIDRs into $set_name"
 }
 
+firewall_chain_exists() {
+  local table="$1"
+  local chain="$2"
+  sudo_run iptables -t "$table" -n -L "$chain" >/dev/null 2>&1
+}
+
+firewall_ensure_chain() {
+  local table="$1"
+  local chain="$2"
+
+  if ! firewall_chain_exists "$table" "$chain"; then
+    sudo_run iptables -t "$table" -N "$chain"
+  fi
+}
+
+firewall_delete_jumps() {
+  local table="$1"
+  local parent_chain="$2"
+  local target_chain="$3"
+  local line
+  local args=()
+
+  while sudo_run iptables -t "$table" -S "$parent_chain" 2>/dev/null | grep -Fq -- "-j $target_chain"; do
+    line="$(sudo_run iptables -t "$table" -S "$parent_chain" 2>/dev/null | grep -F -- "-j $target_chain" | head -n 1 || true)"
+    [[ -n "$line" ]] || break
+    read -r -a args <<< "$line"
+    args[0]="-D"
+    sudo_run iptables -t "$table" "${args[@]}"
+  done
+}
+
+firewall_destroy_chain() {
+  local table="$1"
+  local chain="$2"
+
+  if firewall_chain_exists "$table" "$chain"; then
+    sudo_run iptables -t "$table" -F "$chain"
+    sudo_run iptables -t "$table" -X "$chain"
+  fi
+}
+
 firewall_apply_rules() {
-  local set_name blacklist_set geo_set chain_name blacklist_chain geo_chain timeout_value blacklist_pps blacklist_burst hashlimit_name
-  local blacklist_bps blacklist_bps_burst hashlimit_bps_name port protocol
+  local set_name blacklist_set pending_set verified_set geo_set ingress_chain chain_name blacklist_chain admission_chain geo_chain
+  local timeout_value pending_max pending_timeout verified_max verified_timeout blacklist_pps blacklist_burst hashlimit_name
+  local blacklist_bps blacklist_bps_burst hashlimit_bps_name htable_size htable_max htable_expire_ms htable_gcinterval_ms
+  local port_group target_chain
 
   require_firewall_tools || return 1
   set_name="$(firewall_set_name)"
   blacklist_set="$(firewall_blacklist_set_name)"
+  pending_set="$(firewall_pending_set_name)"
+  verified_set="$(firewall_verified_set_name)"
   geo_set="$(firewall_geo_set_name)"
+  ingress_chain="$(firewall_ingress_chain_name)"
   chain_name="$(firewall_chain_name)"
   blacklist_chain="$(firewall_blacklist_chain_name)"
+  admission_chain="$(firewall_admission_chain_name)"
   geo_chain="$(firewall_geo_chain_name)"
   timeout_value="$(firewall_ipset_timeout)"
+  pending_max="$(firewall_pending_max)"
+  pending_timeout="$(firewall_pending_timeout)"
+  verified_max="$(firewall_verified_max)"
+  verified_timeout="$(firewall_verified_timeout)"
   blacklist_pps="$(firewall_blacklist_pps)"
   blacklist_burst="$(firewall_blacklist_burst)"
   hashlimit_name="$(firewall_hashlimit_name)"
   blacklist_bps="$(firewall_blacklist_bps)"
   blacklist_bps_burst="$(firewall_blacklist_bps_burst)"
   hashlimit_bps_name="$(firewall_hashlimit_bps_name)"
+  htable_size="$(firewall_hashlimit_htable_size)"
+  htable_max="$(firewall_hashlimit_htable_max)"
+  htable_expire_ms="$(firewall_hashlimit_htable_expire_ms)"
+  htable_gcinterval_ms="$(firewall_hashlimit_htable_gcinterval_ms)"
 
   sudo_run ipset create "$set_name" hash:ip family inet timeout "$timeout_value" counters -exist
   sudo_run ipset create "$blacklist_set" hash:ip family inet counters -exist
+  sudo_run ipset create "$pending_set" hash:ip family inet hashsize 64 maxelem "$pending_max" timeout "$pending_timeout" counters -exist
+  sudo_run ipset create "$verified_set" hash:ip family inet hashsize 1024 maxelem "$verified_max" timeout "$verified_timeout" -exist
   firewall_geo_load_set
 
-  if ! sudo_run iptables -n -L "$chain_name" >/dev/null 2>&1; then
-    sudo_run iptables -N "$chain_name"
-  fi
+  for target_chain in "$ingress_chain" "$chain_name" "$blacklist_chain" "$admission_chain" "$geo_chain"; do
+    firewall_ensure_chain raw "$target_chain"
+    sudo_run iptables -t raw -F "$target_chain"
+  done
 
-  if ! sudo_run iptables -n -L "$blacklist_chain" >/dev/null 2>&1; then
-    sudo_run iptables -N "$blacklist_chain"
-  fi
+  sudo_run iptables -t raw -A "$chain_name" -m set ! --match-set "$verified_set" src -j SET --add-set "$pending_set" src --exist
+  sudo_run iptables -t raw -A "$chain_name" -m set --match-set "$set_name" src -j RETURN
+  sudo_run iptables -t raw -A "$chain_name" -j SET --add-set "$set_name" src --exist
+  sudo_run iptables -t raw -A "$chain_name" -j RETURN
 
-  if ! sudo_run iptables -n -L "$geo_chain" >/dev/null 2>&1; then
-    sudo_run iptables -N "$geo_chain"
-  fi
+  sudo_run iptables -t raw -A "$admission_chain" -m set --match-set "$verified_set" src -j RETURN
+  sudo_run iptables -t raw -A "$admission_chain" -m set --match-set "$pending_set" src -j RETURN
+  sudo_run iptables -t raw -A "$admission_chain" -j SET --add-set "$pending_set" src --exist
+  sudo_run iptables -t raw -A "$admission_chain" -m set --match-set "$pending_set" src -j RETURN
+  sudo_run iptables -t raw -A "$admission_chain" -j DROP
 
-  sudo_run iptables -F "$chain_name"
-  sudo_run iptables -A "$chain_name" -m set --match-set "$set_name" src -j RETURN
-  sudo_run iptables -A "$chain_name" -j SET --add-set "$set_name" src --exist
-  sudo_run iptables -A "$chain_name" -j RETURN
-
-  sudo_run iptables -F "$blacklist_chain"
-  sudo_run iptables -A "$blacklist_chain" -m set --match-set "$blacklist_set" src -j DROP
-  sudo_run iptables -A "$blacklist_chain" \
+  sudo_run iptables -t raw -A "$blacklist_chain" \
     -m hashlimit \
     --hashlimit-above "${blacklist_pps}/second" \
     --hashlimit-burst "$blacklist_burst" \
     --hashlimit-mode srcip \
     --hashlimit-name "$hashlimit_name" \
+    --hashlimit-htable-size "$htable_size" \
+    --hashlimit-htable-max "$htable_max" \
+    --hashlimit-htable-expire "$htable_expire_ms" \
+    --hashlimit-htable-gcinterval "$htable_gcinterval_ms" \
     -j SET --add-set "$blacklist_set" src --exist
-  sudo_run iptables -A "$blacklist_chain" \
+  sudo_run iptables -t raw -A "$blacklist_chain" \
     -m hashlimit \
     --hashlimit-above "$blacklist_bps" \
     --hashlimit-burst "$blacklist_bps_burst" \
     --hashlimit-mode srcip \
     --hashlimit-name "$hashlimit_bps_name" \
+    --hashlimit-htable-size "$htable_size" \
+    --hashlimit-htable-max "$htable_max" \
+    --hashlimit-htable-expire "$htable_expire_ms" \
+    --hashlimit-htable-gcinterval "$htable_gcinterval_ms" \
     -j SET --add-set "$blacklist_set" src --exist
-  sudo_run iptables -A "$blacklist_chain" -m set --match-set "$blacklist_set" src -j DROP
-  sudo_run iptables -A "$blacklist_chain" -j RETURN
+  sudo_run iptables -t raw -A "$blacklist_chain" -m set --match-set "$blacklist_set" src -j DROP
+  sudo_run iptables -t raw -A "$blacklist_chain" -j RETURN
 
-  sudo_run iptables -F "$geo_chain"
-  sudo_run iptables -A "$geo_chain" -m set --match-set "$geo_set" src -j DROP
-  sudo_run iptables -A "$geo_chain" -j RETURN
+  sudo_run iptables -t raw -A "$geo_chain" -m set --match-set "$geo_set" src -j DROP
+  sudo_run iptables -t raw -A "$geo_chain" -j RETURN
 
-  while IFS= read -r port; do
-    [[ -n "$port" ]] || continue
-    for protocol in udp tcp; do
-      if ! sudo_run iptables -C INPUT -p "$protocol" --dport "$port" -j "$chain_name" >/dev/null 2>&1; then
-        sudo_run iptables -I INPUT 1 -p "$protocol" --dport "$port" -j "$chain_name"
-      fi
-      if ! sudo_run iptables -C INPUT -p "$protocol" --dport "$port" -j "$geo_chain" >/dev/null 2>&1; then
-        sudo_run iptables -I INPUT 1 -p "$protocol" --dport "$port" -j "$geo_chain"
-      fi
-      if ! sudo_run iptables -C INPUT -p "$protocol" --dport "$port" -j "$blacklist_chain" >/dev/null 2>&1; then
-        sudo_run iptables -I INPUT 1 -p "$protocol" --dport "$port" -j "$blacklist_chain"
-      fi
-    done
-  done < <(firewall_ports)
+  sudo_run iptables -t raw -A "$ingress_chain" -j "$admission_chain"
+  sudo_run iptables -t raw -A "$ingress_chain" -m set --match-set "$blacklist_set" src -j DROP
+  sudo_run iptables -t raw -A "$ingress_chain" -j "$geo_chain"
+  sudo_run iptables -t raw -A "$ingress_chain" -j "$blacklist_chain"
+  sudo_run iptables -t raw -A "$ingress_chain" -j "$chain_name"
+  sudo_run iptables -t raw -A "$ingress_chain" -j RETURN
+
+  firewall_delete_jumps raw PREROUTING "$ingress_chain"
+  while IFS= read -r port_group; do
+    [[ -n "$port_group" ]] || continue
+    sudo_run iptables -t raw -I PREROUTING 1 -p udp -m multiport --dports "$port_group" -j "$ingress_chain"
+  done < <(firewall_port_groups)
+
+  for target_chain in "$chain_name" "$blacklist_chain" "$admission_chain" "$geo_chain"; do
+    firewall_delete_jumps filter INPUT "$target_chain"
+  done
+  firewall_destroy_chain filter "$chain_name"
+  firewall_destroy_chain filter "$blacklist_chain"
+  firewall_destroy_chain filter "$admission_chain"
+  firewall_destroy_chain filter "$geo_chain"
 
   echo "[OK] HostForge firewall player tracking is active."
+  echo "Table/hook:    raw/PREROUTING"
   echo "Player set:    $set_name"
   echo "Blacklist set: $blacklist_set"
+  echo "Pending set:   $pending_set"
+  echo "Verified set:  $verified_set"
   echo "Geo block set: $geo_set"
+  echo "Ingress chain: $ingress_chain"
   echo "Player chain:  $chain_name"
   echo "Block chain:   $blacklist_chain"
+  echo "Admission:     $admission_chain"
   echo "Geo chain:     $geo_chain"
   echo "Ports:         $(firewall_ports | paste -sd ' ' -)"
   echo "Timeout:       ${timeout_value}s"
+  echo "Admission:     verified plus ${pending_max} pending IPs"
+  echo "Pending lease: ${pending_timeout}s, renewed after enforcement"
+  echo "Verified:      collector-managed, ${verified_timeout}s timeout"
   echo "Blacklist:     above ${blacklist_pps}pps with burst ${blacklist_burst}"
   echo "Bandwidth:     above ${blacklist_bps} with burst ${blacklist_bps_burst}"
+  echo "Hash tables:   size ${htable_size}, max ${htable_max}, expire ${htable_expire_ms}ms, GC ${htable_gcinterval_ms}ms"
 }
 
 firewall_remove_rules() {
-  local set_name geo_set chain_name blacklist_chain geo_chain line target_chain
-  local args=()
+  local set_name pending_set geo_set ingress_chain chain_name blacklist_chain admission_chain geo_chain target_chain
 
   require_firewall_tools || return 1
   set_name="$(firewall_set_name)"
+  pending_set="$(firewall_pending_set_name)"
   geo_set="$(firewall_geo_set_name)"
+  ingress_chain="$(firewall_ingress_chain_name)"
   chain_name="$(firewall_chain_name)"
   blacklist_chain="$(firewall_blacklist_chain_name)"
+  admission_chain="$(firewall_admission_chain_name)"
   geo_chain="$(firewall_geo_chain_name)"
 
-  for target_chain in "$chain_name" "$blacklist_chain" "$geo_chain"; do
-    while sudo_run iptables -S INPUT 2>/dev/null | grep -q -- "-j $target_chain"; do
-      line="$(sudo_run iptables -S INPUT 2>/dev/null | grep -- "-j $target_chain" | head -n 1 || true)"
-      [[ -n "$line" ]] || break
-      read -r -a args <<< "$line"
-      args[0]="-D"
-      sudo_run iptables "${args[@]}" || break
-    done
+  firewall_delete_jumps raw PREROUTING "$ingress_chain"
+  firewall_destroy_chain raw "$ingress_chain"
+  firewall_destroy_chain raw "$chain_name"
+  firewall_destroy_chain raw "$blacklist_chain"
+  firewall_destroy_chain raw "$admission_chain"
+  firewall_destroy_chain raw "$geo_chain"
+
+  for target_chain in "$chain_name" "$blacklist_chain" "$admission_chain" "$geo_chain"; do
+    firewall_delete_jumps filter INPUT "$target_chain"
+    firewall_destroy_chain filter "$target_chain"
   done
 
-  if sudo_run iptables -n -L "$chain_name" >/dev/null 2>&1; then
-    sudo_run iptables -F "$chain_name" || true
-    sudo_run iptables -X "$chain_name" || true
-  fi
-  if sudo_run iptables -n -L "$blacklist_chain" >/dev/null 2>&1; then
-    sudo_run iptables -F "$blacklist_chain" || true
-    sudo_run iptables -X "$blacklist_chain" || true
-  fi
-  if sudo_run iptables -n -L "$geo_chain" >/dev/null 2>&1; then
-    sudo_run iptables -F "$geo_chain" || true
-    sudo_run iptables -X "$geo_chain" || true
-  fi
-
   sudo_run ipset destroy "$set_name" >/dev/null 2>&1 || true
+  sudo_run ipset destroy "$pending_set" >/dev/null 2>&1 || true
   sudo_run ipset destroy "$geo_set" >/dev/null 2>&1 || true
 
   echo "[OK] HostForge firewall player tracking is stopped."
@@ -918,6 +1066,14 @@ firewall_snapshot() {
 
 firewall_blacklist_snapshot() {
   firewall_ipset_snapshot "$(firewall_blacklist_set_name)"
+}
+
+firewall_ipset_count() {
+  local set_name="$1"
+
+  sudo_run ipset list "$set_name" 2>/dev/null \
+    | awk -F ': ' '/^Number of entries:/ { print $2; found=1 } END { if (!found) print 0 }' \
+    || true
 }
 
 firewall_player_rates() {
@@ -1081,12 +1237,16 @@ firewall_select_blacklist_ip() {
 }
 
 firewall_status() {
-  local set_name blacklist_set geo_set chain_name blacklist_chain geo_chain ports
+  local set_name blacklist_set pending_set verified_set geo_set ingress_chain chain_name blacklist_chain admission_chain geo_chain ports
   set_name="$(firewall_set_name)"
   blacklist_set="$(firewall_blacklist_set_name)"
+  pending_set="$(firewall_pending_set_name)"
+  verified_set="$(firewall_verified_set_name)"
   geo_set="$(firewall_geo_set_name)"
+  ingress_chain="$(firewall_ingress_chain_name)"
   chain_name="$(firewall_chain_name)"
   blacklist_chain="$(firewall_blacklist_chain_name)"
+  admission_chain="$(firewall_admission_chain_name)"
   geo_chain="$(firewall_geo_chain_name)"
   ports="$(firewall_ports | paste -sd ' ' -)"
 
@@ -1097,15 +1257,23 @@ firewall_status() {
   echo "Active:     $(unit_active_state "$(firewall_unit_name)")"
   echo "Player set: $set_name"
   echo "Block set:  $blacklist_set"
+  echo "Pending set:$pending_set"
+  echo "Verified set: $verified_set"
   echo "Geo set:    $geo_set"
+  echo "Hook:       raw/PREROUTING"
+  echo "Ingress:    $ingress_chain"
   echo "Track chain:$chain_name"
   echo "Block chain:$blacklist_chain"
+  echo "Admit chain:$admission_chain"
   echo "Geo chain:  $geo_chain"
   echo "Geo dir:    $(firewall_geo_dir)"
   echo "Ports:      ${ports:-none}"
   echo "Timeout:    $(firewall_ipset_timeout)s"
+  echo "Pending IPs: $(firewall_ipset_count "$pending_set")/$(firewall_pending_max) IPs, $(firewall_pending_timeout)s renewable timeout"
+  echo "Verified IPs: $(firewall_ipset_count "$verified_set") IPs, $(firewall_verified_timeout)s collector-renewed timeout"
   echo "Blacklist:  >$(firewall_blacklist_pps)pps burst $(firewall_blacklist_burst)"
   echo "Bandwidth:  >$(firewall_blacklist_bps) burst $(firewall_blacklist_bps_burst)"
+  echo "Hash table: size $(firewall_hashlimit_htable_size), max $(firewall_hashlimit_htable_max), expire $(firewall_hashlimit_htable_expire_ms)ms, GC $(firewall_hashlimit_htable_gcinterval_ms)ms"
   echo "iptables:   $(command -v iptables 2>/dev/null || echo 'missing')"
   echo "ipset:      $(command -v ipset 2>/dev/null || echo 'missing')"
   echo
@@ -1129,7 +1297,11 @@ firewall_stop_service() {
 firewall_restart_service() {
   require_systemctl || return 1
   install_service_template || return 1
-  sudo_run systemctl restart "$(firewall_unit_name)"
+  if systemctl is-active --quiet "$(firewall_unit_name)"; then
+    firewall_apply_rules
+  else
+    sudo_run systemctl enable --now "$(firewall_unit_name)"
+  fi
   systemctl status "$(firewall_unit_name)" --no-pager -n 10 || true
 }
 
@@ -1150,9 +1322,19 @@ web_firewall_status() {
   print_web_kv "active" "$(unit_active_state "$(firewall_unit_name)")"
   print_web_kv "set" "$(firewall_set_name)"
   print_web_kv "blacklist_set" "$(firewall_blacklist_set_name)"
+  print_web_kv "pending_set" "$(firewall_pending_set_name)"
+  print_web_kv "pending_count" "$(firewall_ipset_count "$(firewall_pending_set_name)")"
+  print_web_kv "pending_max" "$(firewall_pending_max)"
+  print_web_kv "pending_timeout" "$(firewall_pending_timeout)"
+  print_web_kv "verified_set" "$(firewall_verified_set_name)"
+  print_web_kv "verified_count" "$(firewall_ipset_count "$(firewall_verified_set_name)")"
+  print_web_kv "verified_timeout" "$(firewall_verified_timeout)"
   print_web_kv "geo_set" "$(firewall_geo_set_name)"
+  print_web_kv "hook" "raw/PREROUTING"
+  print_web_kv "ingress_chain" "$(firewall_ingress_chain_name)"
   print_web_kv "chain" "$(firewall_chain_name)"
   print_web_kv "blacklist_chain" "$(firewall_blacklist_chain_name)"
+  print_web_kv "admission_chain" "$(firewall_admission_chain_name)"
   print_web_kv "geo_chain" "$(firewall_geo_chain_name)"
   print_web_kv "geo_dir" "$(firewall_geo_dir)"
   print_web_kv "ports" "$(firewall_ports | paste -sd ' ' -)"
@@ -1163,6 +1345,10 @@ web_firewall_status() {
   print_web_kv "blacklist_bps" "$(firewall_blacklist_bps)"
   print_web_kv "blacklist_bps_burst" "$(firewall_blacklist_bps_burst)"
   print_web_kv "hashlimit_bps_name" "$(firewall_hashlimit_bps_name)"
+  print_web_kv "hashlimit_htable_size" "$(firewall_hashlimit_htable_size)"
+  print_web_kv "hashlimit_htable_max" "$(firewall_hashlimit_htable_max)"
+  print_web_kv "hashlimit_htable_expire_ms" "$(firewall_hashlimit_htable_expire_ms)"
+  print_web_kv "hashlimit_htable_gcinterval_ms" "$(firewall_hashlimit_htable_gcinterval_ms)"
   print_web_kv "iptables" "$(command -v iptables 2>/dev/null || echo 'missing')"
   print_web_kv "ipset" "$(command -v ipset 2>/dev/null || echo 'missing')"
 }

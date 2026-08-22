@@ -2,6 +2,7 @@
 import argparse
 import html
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,12 +20,13 @@ from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import RLock
-from typing import Deque, Dict, List, Optional, Tuple
+from threading import Event, RLock, Thread
+from typing import Deque, Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
 
 INSTANCE_PATTERN = re.compile(r"[^a-z0-9._-]+")
+IPSET_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,31}$")
 LOG_LINE_PATTERN = re.compile(r"^\[(?P<timestamp>[^\]]+)\] \[(?P<level>[^\]]+)\] \[(?P<source>[^\]]+)\] (?P<message>.*)$")
 
 
@@ -131,6 +134,10 @@ class CollectorConfig:
     hostforge_script: Path
     web_password: str
     web_session_ttl_seconds: int
+    player_ipset_name: str = "hostforge_verified_players"
+    player_ipset_timeout_seconds: int = 90
+    player_snapshot_stale_seconds: int = 30
+    player_ipset_max_entries: int = 4096
 
 
 @dataclass
@@ -156,14 +163,181 @@ class FlashMessage:
     expires_at: float
 
 
+@dataclass
+class PlayerIpSnapshot:
+    generation: str
+    revision: int
+    ips: Tuple[str, ...]
+    received_at: float
+
+
 class HostForgeCollector:
     def __init__(self, config: CollectorConfig):
         self.config = config
         self.instances_dir = self.config.data_dir / "instances"
         self.dumps_dir = self.config.data_dir / "dumps"
         self.lock = RLock()
+        self.player_ip_lock = RLock()
+        self.player_ip_snapshots: Dict[str, PlayerIpSnapshot] = {}
+        self.applied_player_ips: Set[str] = set()
+        self.player_ip_reconciler_stop = Event()
+        self.player_ip_reconciler_thread: Optional[Thread] = None
         self.instances_dir.mkdir(parents=True, exist_ok=True)
         self.dumps_dir.mkdir(parents=True, exist_ok=True)
+
+        if not IPSET_NAME_PATTERN.fullmatch(self.config.player_ipset_name):
+            raise ValueError("HF_PLAYER_IPSET_NAME must contain only letters, numbers, '.', '_' or '-' and be at most 31 characters")
+        if self.config.player_ipset_timeout_seconds < 10:
+            raise ValueError("HF_PLAYER_IPSET_TIMEOUT_SECONDS must be at least 10")
+        if self.config.player_snapshot_stale_seconds < 5:
+            raise ValueError("HF_PLAYER_SNAPSHOT_STALE_SECONDS must be at least 5")
+        if self.config.player_ipset_max_entries < 1:
+            raise ValueError("HF_PLAYER_IPSET_MAX_ENTRIES must be positive")
+
+    def start_player_ip_reconciler(self) -> None:
+        if self.player_ip_reconciler_thread is not None:
+            return
+
+        self.player_ip_reconciler_stop.clear()
+        self.player_ip_reconciler_thread = Thread(
+            target=self._player_ip_reconciler_loop,
+            name="HostForgePlayerIpSet",
+            daemon=True,
+        )
+        self.player_ip_reconciler_thread.start()
+
+    def stop_player_ip_reconciler(self) -> None:
+        self.player_ip_reconciler_stop.set()
+        thread = self.player_ip_reconciler_thread
+        if thread is not None:
+            thread.join(timeout=5)
+        self.player_ip_reconciler_thread = None
+
+    def ingest_player_ips(self, payload: Dict[str, object]) -> Tuple[str, str, int, str, int]:
+        raw_instance_id = str(payload.get("instanceId", "")).strip().lower()
+        if not raw_instance_id or len(raw_instance_id) > 64:
+            raise ValueError("instanceId must contain between 1 and 64 characters")
+        instance_id = normalize_instance_id(raw_instance_id)
+        if instance_id != raw_instance_id:
+            raise ValueError("instanceId must already be normalized")
+
+        try:
+            generation = str(uuid.UUID(str(payload.get("generation", "")).strip()))
+        except ValueError as exc:
+            raise ValueError("generation must be a UUID") from exc
+
+        revision = payload.get("revision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise ValueError("revision must be a non-negative integer")
+
+        parse_timestamp(str(payload.get("timestamp", "")))
+        raw_ips = payload.get("ips")
+        if not isinstance(raw_ips, list):
+            raise ValueError("ips must be an array")
+        if len(raw_ips) > self.config.player_ipset_max_entries:
+            raise ValueError(f"ips cannot contain more than {self.config.player_ipset_max_entries} entries")
+
+        normalized_ips: Set[str] = set()
+        for raw_ip in raw_ips:
+            if not isinstance(raw_ip, str):
+                raise ValueError("every ips entry must be a string")
+            try:
+                address = ipaddress.ip_address(raw_ip.strip())
+            except ValueError as exc:
+                raise ValueError(f"invalid IP address: {raw_ip}") from exc
+            if address.version != 4:
+                raise ValueError("only IPv4 player addresses are supported")
+            normalized_ips.add(str(address))
+
+        ips = tuple(sorted(normalized_ips, key=ipaddress.IPv4Address))
+        now = time.monotonic()
+        with self.player_ip_lock:
+            self._prune_stale_player_snapshots_locked(now)
+            current = self.player_ip_snapshots.get(instance_id)
+            if current is not None and current.generation == generation:
+                if revision < current.revision:
+                    return instance_id, generation, revision, "ignored", len(current.ips)
+                if revision == current.revision:
+                    if current.ips != ips:
+                        raise ValueError("revision already exists with a different IP snapshot")
+                    current.received_at = now
+                    return instance_id, generation, revision, "accepted", len(ips)
+
+            snapshot_changed = current is None or current.generation != generation or current.ips != ips
+            self.player_ip_snapshots[instance_id] = PlayerIpSnapshot(generation, revision, ips, now)
+            if snapshot_changed or self._desired_player_ips_locked() != self.applied_player_ips:
+                self._reconcile_player_ipset_locked(now)
+
+        return instance_id, generation, revision, "accepted", len(ips)
+
+    def _player_ip_reconciler_loop(self) -> None:
+        interval_seconds = max(1.0, min(5.0, self.config.player_snapshot_stale_seconds / 2.0))
+        while not self.player_ip_reconciler_stop.wait(interval_seconds):
+            try:
+                with self.player_ip_lock:
+                    self._reconcile_player_ipset_locked(time.monotonic())
+            except Exception as exc:
+                print(f"Player ipset reconciliation failed: {exc}", file=sys.stderr)
+
+    def _prune_stale_player_snapshots_locked(self, now: float) -> None:
+        stale_before = now - self.config.player_snapshot_stale_seconds
+        stale_instances = [
+            instance_id
+            for instance_id, snapshot in self.player_ip_snapshots.items()
+            if snapshot.received_at < stale_before
+        ]
+        for instance_id in stale_instances:
+            del self.player_ip_snapshots[instance_id]
+
+    def _reconcile_player_ipset_locked(self, now: float) -> None:
+        self._prune_stale_player_snapshots_locked(now)
+        desired_ips = self._desired_player_ips_locked()
+        if not desired_ips and not self.applied_player_ips:
+            return
+        if len(desired_ips) > self.config.player_ipset_max_entries:
+            raise RuntimeError(
+                f"verified player union contains {len(desired_ips)} IPs, exceeding maxelem {self.config.player_ipset_max_entries}"
+            )
+
+        commands = [
+            "create "
+            f"{self.config.player_ipset_name} hash:ip family inet hashsize 1024 "
+            f"maxelem {self.config.player_ipset_max_entries} timeout {self.config.player_ipset_timeout_seconds}"
+        ]
+        for player_ip in sorted(desired_ips, key=ipaddress.IPv4Address):
+            commands.append(
+                f"add {self.config.player_ipset_name} {player_ip} timeout {self.config.player_ipset_timeout_seconds}"
+            )
+        for player_ip in sorted(self.applied_player_ips - desired_ips, key=ipaddress.IPv4Address):
+            commands.append(f"del {self.config.player_ipset_name} {player_ip}")
+
+        self._apply_player_ipset_restore("\n".join(commands) + "\n")
+        self.applied_player_ips = desired_ips
+
+    def _desired_player_ips_locked(self) -> Set[str]:
+        return {
+            player_ip
+            for snapshot in self.player_ip_snapshots.values()
+            for player_ip in snapshot.ips
+        }
+
+    def _apply_player_ipset_restore(self, restore_input: str) -> None:
+        try:
+            completed = subprocess.run(
+                ["sudo", "-n", "ipset", "restore", "-exist"],
+                input=restore_input,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"could not execute ipset restore: {exc}") from exc
+
+        if completed.returncode != 0:
+            output = (completed.stdout or "").strip()
+            raise RuntimeError(f"ipset restore failed with exit {completed.returncode}: {output or 'no output'}")
 
     def instance_dir(self, instance_id: str) -> Path:
         return self.instances_dir / normalize_instance_id(instance_id)
@@ -456,8 +630,18 @@ class HostForgeController:
         data.setdefault("active", "inactive")
         data.setdefault("set", "hostforge_players")
         data.setdefault("blacklist_set", "hostforge_blacklist")
+        data.setdefault("pending_set", "hostforge_pending_players")
+        data.setdefault("pending_count", "0")
+        data.setdefault("pending_max", "50")
+        data.setdefault("pending_timeout", "30")
+        data.setdefault("verified_set", "hostforge_verified_players")
+        data.setdefault("verified_count", "0")
+        data.setdefault("verified_timeout", "90")
+        data.setdefault("hook", "raw/PREROUTING")
+        data.setdefault("ingress_chain", "HOSTFORGE_INGRESS")
         data.setdefault("chain", "HOSTFORGE_PLAYERS")
         data.setdefault("blacklist_chain", "HOSTFORGE_BLACKLIST")
+        data.setdefault("admission_chain", "HOSTFORGE_ADMISSION")
         data.setdefault("ports", "")
         data.setdefault("timeout", "")
         data.setdefault("blacklist_pps", "3000")
@@ -466,6 +650,10 @@ class HostForgeController:
         data.setdefault("blacklist_bps", "512kb/s")
         data.setdefault("blacklist_bps_burst", "2mb")
         data.setdefault("hashlimit_bps_name", "hf_bps")
+        data.setdefault("hashlimit_htable_size", "1024")
+        data.setdefault("hashlimit_htable_max", "4096")
+        data.setdefault("hashlimit_htable_expire_ms", "2000")
+        data.setdefault("hashlimit_htable_gcinterval_ms", "1000")
         data.setdefault("iptables", "missing")
         data.setdefault("ipset", "missing")
         data["command_ok"] = "yes" if result.ok else "no"
@@ -1115,16 +1303,30 @@ class HostForgeWebApp:
             f"> {firewall.get('blacklist_bps', '512kb/s')} "
             f"with burst {firewall.get('blacklist_bps_burst', '2mb')}"
         )
+        verified_text = (
+            f"{firewall.get('verified_count', '0')} IPs, "
+            f"{firewall.get('verified_timeout', '90')}s collector-renewed timeout"
+        )
+        pending_text = (
+            f"{firewall.get('pending_count', '0')}/{firewall.get('pending_max', '50')} IPs, "
+            f"{firewall.get('pending_timeout', '30')}s packet-renewed timeout"
+        )
+        hash_table_text = (
+            f"size {firewall.get('hashlimit_htable_size', '1024')}, "
+            f"max {firewall.get('hashlimit_htable_max', '4096')}, "
+            f"expire {firewall.get('hashlimit_htable_expire_ms', '2000')}ms, "
+            f"GC {firewall.get('hashlimit_htable_gcinterval_ms', '1000')}ms"
+        )
         body = (
             f"{self._render_notice(query)}"
             "<section class=\"panel\">"
             "<div class=\"heading-row\"><h2>Firewall Player Tracking</h2><div class=\"toolbar\">"
             f"{self._render_post_button('/firewall/start', 'Start / Enable', '/firewall/')}"
             f"{self._render_post_button('/firewall/stop', 'Stop / Disable', '/firewall/', style='secondary')}"
-            f"{self._render_post_button('/firewall/restart', 'Restart', '/firewall/')}"
+            f"{self._render_post_button('/firewall/restart', 'Reload Rules', '/firewall/')}"
             "</div></div>"
-            f"{self._render_status_list([('Unit', firewall.get('unit', '')), ('Enabled', firewall.get('enabled', 'missing')), ('Active', firewall.get('active', 'inactive')), ('Player ipset', firewall.get('set', '')), ('Blacklist ipset', firewall.get('blacklist_set', '')), ('Geo block ipset', firewall.get('geo_set', '')), ('Track chain', firewall.get('chain', '')), ('Block chain', firewall.get('blacklist_chain', '')), ('Geo chain', firewall.get('geo_chain', '')), ('Geo dir', firewall.get('geo_dir', '')), ('Tracked ports', firewall.get('ports', '') or 'none'), ('Entry timeout', (firewall.get('timeout', '') + 's') if firewall.get('timeout') else ''), ('PPS auto-blacklist', auto_blacklist_text), ('Bandwidth auto-blacklist', auto_bandwidth_text), ('PPS hashlimit', firewall.get('hashlimit_name', '')), ('Bandwidth hashlimit', firewall.get('hashlimit_bps_name', '')), ('iptables binary', firewall.get('iptables', 'missing')), ('ipset binary', firewall.get('ipset', 'missing'))])}"
-            "<p class=\"muted\">HostForge adds source IPs to a player ipset when packets hit configured Bannerlord ports. Iptables hashlimit adds an IP to the blacklist ipset when that source exceeds either the configured packets/sec or bandwidth rate beyond the burst allowance, and the blacklist chain drops it.</p>"
+            f"{self._render_status_list([('Unit', firewall.get('unit', '')), ('Enabled', firewall.get('enabled', 'missing')), ('Active', firewall.get('active', 'inactive')), ('Player ipset', firewall.get('set', '')), ('Blacklist ipset', firewall.get('blacklist_set', '')), ('Pending player ipset', firewall.get('pending_set', '')), ('Verified player ipset', firewall.get('verified_set', '')), ('Geo block ipset', firewall.get('geo_set', '')), ('Hook', firewall.get('hook', '')), ('Ingress chain', firewall.get('ingress_chain', '')), ('Track chain', firewall.get('chain', '')), ('Block chain', firewall.get('blacklist_chain', '')), ('Admission chain', firewall.get('admission_chain', '')), ('Geo chain', firewall.get('geo_chain', '')), ('Geo dir', firewall.get('geo_dir', '')), ('Tracked UDP ports', firewall.get('ports', '') or 'none'), ('Entry timeout', (firewall.get('timeout', '') + 's') if firewall.get('timeout') else ''), ('Pending admission', pending_text), ('Verified admission', verified_text), ('PPS auto-blacklist', auto_blacklist_text), ('Bandwidth auto-blacklist', auto_bandwidth_text), ('PPS hashlimit', firewall.get('hashlimit_name', '')), ('Bandwidth hashlimit', firewall.get('hashlimit_bps_name', '')), ('Hash table bounds', hash_table_text), ('iptables binary', firewall.get('iptables', 'missing')), ('ipset binary', firewall.get('ipset', 'missing'))])}"
+            "<p class=\"muted\">Verified sources bypass the bounded join window. Up to 50 unverified source IPs can pass while their 30-second leases are renewed by packets that survive blacklist, geo, PPS, and bandwidth enforcement. Additional unverified sources drop before those later checks and before connection tracking.</p>"
             "</section>"
             "<section class=\"panel\">"
             "<div class=\"heading-row\"><h2>Geo Country Blocks</h2><div class=\"toolbar\">"
@@ -1941,6 +2143,14 @@ class HostForgeHandler(BaseHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
+    def do_PUT(self) -> None:
+        path = urlsplit(self.path).path or "/"
+        if path == "/v1/firewall/player-ips":
+            self._handle_player_ip_snapshot()
+            return
+
+        self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
     def _handle_ingest(self) -> None:
         content_length = int(self.headers.get("Content-Length", "0"))
         if content_length <= 0:
@@ -1963,6 +2173,64 @@ class HostForgeHandler(BaseHTTPRequestHandler):
 
         response = json.dumps({"instanceId": instance_id, "timestamp": timestamp, "status": "accepted"}).encode("utf-8")
         self._send_bytes(HTTPStatus.ACCEPTED, response, "application/json; charset=utf-8")
+
+    def _handle_player_ip_snapshot(self) -> None:
+        if not self._client_is_loopback():
+            self.send_error(HTTPStatus.FORBIDDEN, "player IP snapshots are accepted only from loopback")
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(HTTPStatus.BAD_REQUEST, "invalid content length")
+            return
+        if content_length <= 0:
+            self.send_error(HTTPStatus.BAD_REQUEST, "body is required")
+            return
+        if content_length > 65536:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body exceeds 64 KiB")
+            return
+
+        raw_body = self.rfile.read(content_length)
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_error(HTTPStatus.BAD_REQUEST, "invalid json")
+            return
+        if not isinstance(payload, dict):
+            self.send_error(HTTPStatus.BAD_REQUEST, "json body must be an object")
+            return
+
+        assert self.collector is not None
+        try:
+            instance_id, generation, revision, status, ip_count = self.collector.ingest_player_ips(payload)
+        except ValueError as exc:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except RuntimeError as exc:
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
+
+        response = json.dumps(
+            {
+                "instanceId": instance_id,
+                "generation": generation,
+                "revision": revision,
+                "ipCount": ip_count,
+                "status": status,
+            }
+        ).encode("utf-8")
+        self._send_bytes(HTTPStatus.ACCEPTED, response, "application/json; charset=utf-8")
+
+    def _client_is_loopback(self) -> bool:
+        raw_address = self.client_address[0].split("%", 1)[0]
+        try:
+            address = ipaddress.ip_address(raw_address)
+        except ValueError:
+            return False
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        return address.is_loopback
 
     def _redirect_with_action_result(self, path: str, result: ActionResult) -> None:
         assert self.web_app is not None
@@ -2076,6 +2344,10 @@ def build_config(args: argparse.Namespace) -> CollectorConfig:
     hostforge_script = Path(os.environ.get("HF_HOSTFORGE_SCRIPT", str(repo_dir / "hostforge.sh"))).resolve()
     web_password = os.environ.get("HF_WEB_PASSWORD", "")
     web_session_ttl_seconds = int(os.environ.get("HF_WEB_SESSION_TTL_SECONDS", "43200"))
+    player_ipset_name = os.environ.get("HF_PLAYER_IPSET_NAME", "hostforge_verified_players")
+    player_ipset_timeout_seconds = int(os.environ.get("HF_PLAYER_IPSET_TIMEOUT_SECONDS", "90"))
+    player_snapshot_stale_seconds = int(os.environ.get("HF_PLAYER_SNAPSHOT_STALE_SECONDS", "30"))
+    player_ipset_max_entries = int(os.environ.get("HF_PLAYER_IPSET_MAX_ENTRIES", "4096"))
     return CollectorConfig(
         bind,
         port,
@@ -2087,6 +2359,10 @@ def build_config(args: argparse.Namespace) -> CollectorConfig:
         hostforge_script,
         web_password,
         web_session_ttl_seconds,
+        player_ipset_name,
+        player_ipset_timeout_seconds,
+        player_snapshot_stale_seconds,
+        player_ipset_max_entries,
     )
 
 
@@ -2109,6 +2385,7 @@ def run_server(config: CollectorConfig) -> int:
     HostForgeHandler.collector = collector
     HostForgeHandler.web_app = HostForgeWebApp(config, collector, controller)
     server = ThreadingHTTPServer((config.bind, config.port), HostForgeHandler)
+    collector.start_player_ip_reconciler()
 
     print(f"HostForge listening on http://{config.bind}:{config.port}/")
     print(f"Using repo {config.repo_dir}")
@@ -2120,6 +2397,7 @@ def run_server(config: CollectorConfig) -> int:
         print("HostForge stopped.")
     finally:
         server.server_close()
+        collector.stop_player_ip_reconciler()
 
     return 0
 
